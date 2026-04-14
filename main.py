@@ -1,15 +1,17 @@
 import asyncio
 import logging
+import os
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiohttp import web
 import database 
 
 logging.basicConfig(level=logging.INFO)
 
-TOKEN = "SE8740821772:AAHn1gMm_hdn-UDYD41LtcCwYZjW1blMPmc"
+TOKEN = "8740821772:AAHn1gMm_hdn-UDYD41LtcCwYZjW1blMPmc"
 ADMIN_ID = 8645642283
 
 bot = Bot(token=TOKEN)
@@ -83,10 +85,29 @@ async def etir_bolmesi(message: types.Message):
 async def admin_elaqe(message: types.Message):
     await message.answer("Təkliflər üçün adminə yazın: @senin_username_in")
 
+# --- RENDER ÜÇÜN SAXTA VEB-SERVER HİSSƏSİ ---
+async def ping(request):
+    return web.Response(text="Bot is alive!")
+
 async def main():
     database.bazani_yarat()
-    print("Bot işə düşdü. Proxy dərdi yoxdur...")
-    await dp.start_polling(bot)
+    print("Bot işə düşdü...")
+    
+    # 1. Botu arxa planda işə salırıq
+    asyncio.create_task(dp.start_polling(bot))
+    
+    # 2. Renderin pulsuz xidməti üçün saxta veb-server başladırıq
+    app = web.Application()
+    app.add_routes([web.get('/', ping)])
+    runner = web.AppRunner(app)
+    await runner.setup()
+    port = int(os.environ.get("PORT", 10000))
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    
+    # 3. Sonsuz dövr ki, proqram dayanmasın
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     asyncio.run(main())
