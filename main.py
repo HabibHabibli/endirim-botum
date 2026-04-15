@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
@@ -11,17 +12,20 @@ import database
 
 logging.basicConfig(level=logging.INFO)
 
+# 👇 BURAYA ÖZ TOKENİNİ VƏ ADMİN ID-LƏRİNİ YAZ
 TOKEN = "8740821772:AAHn1gMm_hdn-UDYD41LtcCwYZjW1blMPmc"
-ADMIN_IDS = [8645642283, 2111781743] # Admin ID-ləri bura yazın
+ADMIN_IDS = [8645642283, 2111781743]  
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
-# --- FSM STATES ---
+# --- FSM STATES (Vəziyyətlər) ---
 class AdminState(StatesGroup):
     link_kateqoriya = State()
     link_ad = State()
     link_url = State()
+    reply_target_uid = State() # Şəxsi cavab üçün
+    reply_msg = State()
 
 class BroadcastState(StatesGroup):
     mesaj_metni = State()
@@ -32,209 +36,281 @@ class SuggestionState(StatesGroup):
 # --- MENYULAR ---
 def ana_menyu():
     duymeler = [
-        [KeyboardButton(text="🔥 Günün Endirimləri"), KeyboardButton(text="⚡ Flash Endirimlər")],
-        [KeyboardButton(text="🕵️ Gizli Kampaniyalar"), KeyboardButton(text="🎟 Aktiv Kodlar")],
+        [KeyboardButton(text="🔥 Günün Endirimləri"), KeyboardButton(text="🎟 Aktiv Kodlar")],
+        [KeyboardButton(text="🕵️ Gizli Kampaniyalar"), KeyboardButton(text="⚡ Flash Endirimlər")],
         [KeyboardButton(text="🛍 Məhsul Kateqoriyası")],
-        [KeyboardButton(text="❤️ İstək Siyahısı"), KeyboardButton(text="💡 Təklif Qutusu")]
+        [KeyboardButton(text="💡 İstək və Təklif Qutusu")]
     ]
     return ReplyKeyboardMarkup(keyboard=duymeler, resize_keyboard=True)
 
-# --- ALT KATEQORİYA KLAVİATURALARI (Dinamik Naviqasiya) ---
-def cat_main():
+# ==========================================
+# 🌳 ALT KATEQORİYA (NAVİQASİYA) SİSTEMİ
+# ==========================================
+def nav_main_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👗 Paltar", callback_data="sub_paltar"), InlineKeyboardButton(text="👕 Köynək", callback_data="sub_koynek")],
-        [InlineKeyboardButton(text="👖 Şalvar", callback_data="sub_salvar"), InlineKeyboardButton(text="👟 Ayaqqabı", callback_data="sub_ayaqqabi")],
-        [InlineKeyboardButton(text="👶 Uşaq", callback_data="sub_usaq"), InlineKeyboardButton(text="🕶 Aksesuar", callback_data="sub_aksesuar")]
+        [InlineKeyboardButton(text="👗 Paltar", callback_data="nav_paltar"), InlineKeyboardButton(text="👕 Köynək", callback_data="nav_koynek")],
+        [InlineKeyboardButton(text="👖 Şalvar", callback_data="nav_salvar"), InlineKeyboardButton(text="👟 Ayaqqabı", callback_data="nav_ay")],
+        [InlineKeyboardButton(text="👶 Uşaq Geyimləri", callback_data="nav_usaq"), InlineKeyboardButton(text="🕶 Aksesuar", callback_data="nav_aks")]
     ])
 
-def cat_gender(prefix):
+def nav_gender_kb(prefix):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👩 Qadın", callback_data=f"final_{prefix}_qadin"),
-         InlineKeyboardButton(text="👨 Kişi", callback_data=f"final_{prefix}_kisi")],
-        [InlineKeyboardButton(text="⬅️ Geri", callback_data="back_to_main")]
+        [InlineKeyboardButton(text="👩 Qadın", callback_data=f"ucat_{prefix}_qadin"), InlineKeyboardButton(text="👨 Kişi", callback_data=f"ucat_{prefix}_kisi")],
+        [InlineKeyboardButton(text="⬅️ Geri", callback_data="nav_main")]
     ])
 
-def cat_ayaqqabi_gender():
+def nav_ay_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👩 Qadın Ayaqqabı", callback_data="sub_ay_qadin")],
-        [InlineKeyboardButton(text="👨 Kişi Ayaqqabı", callback_data="sub_ay_kisi")],
-        [InlineKeyboardButton(text="⬅️ Geri", callback_data="back_to_main")]
+        [InlineKeyboardButton(text="👩 Qadın Ayaqqabı", callback_data="nav_ay_qadin"), InlineKeyboardButton(text="👨 Kişi Ayaqqabı", callback_data="nav_ay_kisi")],
+        [InlineKeyboardButton(text="⬅️ Geri", callback_data="nav_main")]
     ])
 
-def cat_ayaqqabi_tip(gender_prefix):
+def nav_ay_type_kb(gender):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👞 Klassik", callback_data=f"final_{gender_prefix}_klassik")],
-        [InlineKeyboardButton(text="👟 Gündəlik", callback_data=f"final_{gender_prefix}_gundelik")],
-        [InlineKeyboardButton(text="⬅️ Geri", callback_data="sub_ayaqqabi")]
+        [InlineKeyboardButton(text="👞 Klassik", callback_data=f"ucat_ay_{gender}_klassik"), InlineKeyboardButton(text="👟 Gündəlik", callback_data=f"ucat_ay_{gender}_gundelik")],
+        [InlineKeyboardButton(text="⬅️ Geri", callback_data="nav_ay")]
     ])
 
-def cat_usaq():
+def nav_usaq_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👕 Geyim", callback_data="final_usaq_geyim")],
-        [InlineKeyboardButton(text="👟 Ayaqqabı", callback_data="final_usaq_ayaqqabi")],
-        [InlineKeyboardButton(text="⬅️ Geri", callback_data="back_to_main")]
+        [InlineKeyboardButton(text="👕 Geyim", callback_data="ucat_usaq_geyim"), InlineKeyboardButton(text="👟 Ayaqqabı", callback_data="ucat_usaq_ayaqqabi")],
+        [InlineKeyboardButton(text="⬅️ Geri", callback_data="nav_main")]
     ])
 
-# --- ADMIN ÜÇÜN SEÇİM (Hər şey daxil) ---
-def admin_cat_secim():
-    # Admin link əlavə edərkən bütün son nöqtələri burdan seçir
+# Adminin ilkin seçimi (Ana kateqoriyalar + Məhsul menyusu)
+def admin_top_cat_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Günün Endirimi", callback_data="admcat_gunun")],
-        [InlineKeyboardButton(text="Flash Endirim", callback_data="admcat_flash")],
-        [InlineKeyboardButton(text="Gizli Kampaniya", callback_data="admcat_gizli")],
-        [InlineKeyboardButton(text="Aktiv Kod", callback_data="admcat_kod")],
-        [InlineKeyboardButton(text="Paltar Qadın", callback_data="admcat_paltar_qadin")],
-        [InlineKeyboardButton(text="Ayaqqabı Kişi Klassik", callback_data="admcat_ay_kisi_klassik")]
-        # Digər alt kateqoriyalar da eyni məntiqlə bura əlavə edilə bilər
+        [InlineKeyboardButton(text="🔥 Günün Endirimləri", callback_data="ucat_gunun"), InlineKeyboardButton(text="🎟 Aktiv Kodlar", callback_data="ucat_kod")],
+        [InlineKeyboardButton(text="🕵️ Gizli Kampaniyalar", callback_data="ucat_gizli"), InlineKeyboardButton(text="⚡ Flash Endirimlər", callback_data="ucat_flash")],
+        [InlineKeyboardButton(text="🛍 Məhsul Kateqoriyası (Alt menyu)", callback_data="nav_main")]
     ])
 
-# --- CALLBACK HANDLERS (Naviqasiya) ---
-@dp.callback_query(F.data == "sub_paltar")
-async def s_paltar(c: types.CallbackQuery): await c.message.edit_text("Cins seçin:", reply_markup=cat_gender("paltar"))
-
-@dp.callback_query(F.data == "sub_ayaqqabi")
-async def s_ay(c: types.CallbackQuery): await c.message.edit_text("Cins seçin:", reply_markup=cat_ayaqqabi_gender())
-
-@dp.callback_query(F.data == "sub_ay_qadin")
-async def s_ay_q(c: types.CallbackQuery): await c.message.edit_text("Stil seçin:", reply_markup=cat_ayaqqabi_tip("ay_qadin"))
-
-@dp.callback_query(F.data == "sub_usaq")
-async def s_usaq(c: types.CallbackQuery): await c.message.edit_text("Uşaq bölməsi:", reply_markup=cat_usaq())
-
-@dp.callback_query(F.data == "back_to_main")
-async def back(c: types.CallbackQuery): await c.message.edit_text("Kateqoriyalar:", reply_markup=cat_main())
+# --- NAVİQASİYA (KATEQORİYA) İDARƏEDİCİSİ ---
+@dp.callback_query(F.data.startswith("nav_"))
+async def handle_nav(c: types.CallbackQuery):
+    nav = c.data
+    if nav == "nav_main": kb = nav_main_kb()
+    elif nav == "nav_paltar": kb = nav_gender_kb("paltar")
+    elif nav == "nav_koynek": kb = nav_gender_kb("koynek")
+    elif nav == "nav_salvar": kb = nav_gender_kb("salvar")
+    elif nav == "nav_aks": kb = nav_gender_kb("aksesuar")
+    elif nav == "nav_ay": kb = nav_ay_kb()
+    elif nav == "nav_ay_qadin": kb = nav_ay_type_kb("qadin")
+    elif nav == "nav_ay_kisi": kb = nav_ay_type_kb("kisi")
+    elif nav == "nav_usaq": kb = nav_usaq_kb()
+    else: return
+    
+    await c.message.edit_reply_markup(reply_markup=kb)
+    await c.answer()
 
 # --- LİNKLƏRİ GÖSTƏRMƏ FUNKSİYASI ---
-@dp.callback_query(F.data.startswith("final_"))
-async def show_links(callback: types.CallbackQuery):
-    cat_code = callback.data.replace("final_", "")
-    linkler = database.kateqoriya_linklerini_getir(cat_code)
-    
+async def linkleri_goster(message: types.Message, kateqoriya, bashliq):
+    linkler = database.kateqoriya_linklerini_getir(kateqoriya)
     if not linkler:
-        await callback.answer("Bu kateqoriyada hələlik link yoxdur.", show_alert=True)
-        return
-
-    mesaj = "🔍 **Tapılan Məhsullar:**\n\n"
-    kb = InlineKeyboardMarkup(inline_keyboard=[])
-    for l_id, name, _ in linkler:
-        kb.inline_keyboard.append([InlineKeyboardButton(text=name, callback_data=f"getlink_{l_id}")])
+        return await message.answer(f"Hazırda bu bölmədə yeni link/kod yoxdur. Tezliklə əlavə olunacaq! ⏳")
     
-    await callback.message.answer(mesaj, reply_markup=kb, parse_mode="Markdown")
+    # VIP yoxlaması
+    if kateqoriya == "gizli" and not database.vip_yoxla(message.from_user.id):
+        return await message.answer("🔒 Bu bölmə yalnız 'Sadiq İzləyici'lər (VIP) üçündür!\nVIP olmaq üçün botdakı linklərə mütəmadi daxil olun.")
 
-# --- ADMIN TOPLU MESAJ (KATEQORİYASIZ LİNK) ---
-@dp.message(Command("duyuru"))
-async def broadcast_start(message: types.Message, state: FSMContext):
-    if message.from_user.id not in ADMIN_IDS: return
-    await message.answer("Bütün istifadəçilərə göndəriləcək mesajı yazın (Məlumat və Link daxil):")
-    await state.set_state(BroadcastState.mesaj_metni)
+    mesaj = f"*{bashliq}*\nAşağıdakı düymələrə basaraq məhsula baxa bilərsiniz:\n\n"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+    for link_id, name, _ in linkler:
+        keyboard.inline_keyboard.append([InlineKeyboardButton(text=name, callback_data=f"getlink_{link_id}")])
+    
+    await message.answer(mesaj, reply_markup=keyboard, parse_mode="Markdown")
 
-@dp.message(BroadcastState.mesaj_metni)
-async def broadcast_send(message: types.Message, state: FSMContext):
-    users = database.butun_istifadecileri_getir()
-    count = 0
-    await message.answer("🚀 Mesaj göndərilir...")
-    for uid in users:
-        try:
-            await bot.send_message(uid, f"📢 **YENİ TƏKLİF!**\n\n{message.text}", parse_mode="Markdown")
-            count += 1
-            await asyncio.sleep(0.05)
-        except: pass
-    await message.answer(f"✅ Mesaj {count} nəfərə uğurla çatdırıldı.")
-    await state.clear()
+# --- SON KATEQORİYA SEÇİMİ (İstifadəçi və Admin eyni yerdən keçir) ---
+@dp.callback_query(F.data.startswith("ucat_"))
+async def handle_ucat(c: types.CallbackQuery, state: FSMContext):
+    cat = c.data.replace("ucat_", "")
+    current_state = await state.get_state()
 
-# --- TƏKLİF QUTUSU VƏ FƏRDİ CAVAB ---
+    # Əgər klikləyən admin-dirsə və link əlavə edirsə:
+    if current_state == AdminState.link_kateqoriya.state:
+        await state.update_data(kat=cat)
+        await c.message.answer(f"✅ Kateqoriya seçildi: **{cat}**\n\nMəhsulun (və ya kodun) adını yazın:", parse_mode="Markdown")
+        await state.set_state(AdminState.link_ad)
+    
+    # Əgər sadə istifadəçidirsə, həmin kateqoriyanın məhsullarını göstər:
+    else:
+        await linkleri_goster(c.message, cat, f"🛍 Seçilmiş Bölmə: {cat}")
+    await c.answer()
+
+@dp.callback_query(F.data.startswith("getlink_"))
+async def linki_ver_ve_say(callback: types.CallbackQuery):
+    link_id = int(callback.data.split("_")[1])
+    url = database.linki_getir(link_id)
+    if url:
+        database.klik_artir(callback.from_user.id)
+        await callback.message.answer(f"🔗 Sizin linkiniz (və ya kodunuz):\n\n{url}")
+        await callback.answer("Göndərildi!", show_alert=False)
+    else:
+        await callback.answer("Məlumat tapılmadı.", show_alert=True)
+
+# --- ƏSAS KOMANDALAR ---
+@dp.message(CommandStart())
+async def start_komandasi(message: types.Message):
+    database.istifadeci_elave_et(message.from_user.id, message.from_user.username, message.from_user.first_name)
+    await message.answer(f"Salam, {message.from_user.first_name}! 🛍\n\nTrendyolun ən yaxşı endirimləri burada. Aşağıdakı menyudan istədiyini seç!", reply_markup=ana_menyu())
+
+@dp.message(F.text == "🔥 Günün Endirimləri")
+async def m_gun(m: types.Message): await linkleri_goster(m, "gunun", "🔥 Günün Endirimləri")
+
+@dp.message(F.text == "🎟 Aktiv Kodlar")
+async def m_kod(m: types.Message): await linkleri_goster(m, "kod", "🎟 Aktiv Kodlar")
+
+@dp.message(F.text == "🕵️ Gizli Kampaniyalar")
+async def m_gizli(m: types.Message): await linkleri_goster(m, "gizli", "🕵️ Gizli Kampaniyalar")
+
+@dp.message(F.text == "⚡ Flash Endirimlər")
+async def m_flash(m: types.Message): await linkleri_goster(m, "flash", "⚡ Flash Endirimlər")
+
+@dp.message(F.text == "🛍 Məhsul Kateqoriyası")
+async def m_cat(m: types.Message): await m.answer("Bölməni seçin:", reply_markup=nav_main_kb())
+
+# ==========================================
+# 💡 İSTƏK / TƏKLİF VƏ ŞƏXSİ CAVAB SİSTEMİ
+# ==========================================
+@dp.message(F.text == "💡 İstək və Təklif Qutusu")
+async def req_start(message: types.Message, state: FSMContext):
+    await message.answer("Hansı məhsulları axtarırsınız? Adminlərə istəyinizi yazın:")
+    await state.set_state(SuggestionState.mesaj)
+
 @dp.message(SuggestionState.mesaj)
-async def suggestion_handle(message: types.Message, state: FSMContext):
+async def req_save(message: types.Message, state: FSMContext):
     database.teklif_yaz(message.from_user.id, message.text)
-    await message.answer("Təklifiniz qəbul edildi! Adminlər sizə xüsusi olaraq cavab verə bilər.")
+    await message.answer("İstəyiniz qəbul edildi! Adminlər sizə xüsusi link tapıb göndərəcək. 🎁")
     
-    # Adminlərə "Xüsusi Cavab Ver" düyməsi ilə göndər
-    for aid in ADMIN_IDS:
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="💬 Cavab Ver (Link At)", callback_data=f"reply_{message.from_user.id}")]])
-        try: await bot.send_message(aid, f"💡 **Yeni Təklif!**\nKim: @{message.from_user.username}\nMesaj: {message.text}", reply_markup=kb)
+    # Bütün Adminlərə bildiriş və "Cavab Ver" düyməsi gedir
+    for admin_id in ADMIN_IDS:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="💬 Cavab Ver (Link At)", callback_data=f"reply_{message.from_user.id}")]
+        ])
+        try:
+            await bot.send_message(admin_id, f"💡 **Yeni İstək!**\nKim: @{message.from_user.username}\nMesaj: {message.text}", reply_markup=kb)
         except: pass
     await state.clear()
 
 @dp.callback_query(F.data.startswith("reply_"))
-async def admin_reply_start(callback: types.CallbackQuery, state: FSMContext):
-    target_id = callback.data.split("_")[1]
-    await state.update_data(target=target_id)
-    await callback.message.answer(f"İstifadəçiyə göndəriləcək xüsusi linki və mesajı yazın:")
-    await state.set_state(AdminState.link_url) # Mövcud state-i istifadə edirik
-    await callback.answer()
+async def admin_reply_start(c: types.CallbackQuery, state: FSMContext):
+    if c.from_user.id not in ADMIN_IDS: return
+    target_uid = int(c.data.split("_")[1])
+    await state.update_data(target_uid=target_uid)
+    await c.message.answer("Bu istifadəçiyə göndəriləcək xüsusi linki və məlumatı yazın:")
+    await state.set_state(AdminState.reply_msg)
+    await c.answer()
 
-# --- ADMIN PANELİ (LİNK ƏLAVƏ) ---
+@dp.message(AdminState.reply_msg)
+async def admin_reply_send(m: types.Message, state: FSMContext):
+    data = await state.get_data()
+    target = data['target_uid']
+    
+    # 1. İstifadəçiyə şəxsi olaraq göndəririk
+    try:
+        await bot.send_message(target, f"🎁 **Admin sizin istəyinizə uyğun məhsul tapdı!**\n\n{m.text}")
+        await m.answer("✅ Link uğurla və yalnız həmin istifadəçiyə göndərildi.")
+    except:
+        await m.answer("❌ İstifadəçiyə mesaj çatmadı (bəlkə botu bloklayıb).")
+
+    # 2. Digər adminləri məlumatlandırırıq
+    for admin in ADMIN_IDS:
+        if admin != m.from_user.id:
+            try: await bot.send_message(admin, f"ℹ️ Admin @{m.from_user.username} istifadəçinin istəyinə cavab verdi:\n{m.text}")
+            except: pass
+    await state.clear()
+
+# ==========================================
+# 👑 ADMIN PANELİ VƏ TOPLU MESAJ (BROADCAST)
+# ==========================================
 @dp.message(Command("admin"))
-async def admin_main(message: types.Message):
+async def admin_panel(message: types.Message):
     if message.from_user.id not in ADMIN_IDS: return
     kb = ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="➕ Kateqoriyaya Link")],
-        [KeyboardButton(text="📢 Hamıya Mesaj (/duyuru)")],
+        [KeyboardButton(text="📢 Hamıya Mesaj (Kateqoriyasız)")],
         [KeyboardButton(text="📊 Statistika")]
     ], resize_keyboard=True)
-    await message.answer("👑 Admin Paneli", reply_markup=kb)
+    await message.answer("👑 Admin Paneli. Nə etmək istəyirsiniz?", reply_markup=kb)
 
+# Hamıya Mesaj (Broadcast)
+@dp.message(F.text == "📢 Hamıya Mesaj (Kateqoriyasız)")
+async def broadcast_start(m: types.Message, state: FSMContext):
+    if m.from_user.id not in ADMIN_IDS: return
+    await m.answer("Bütün bot istifadəçilərinə gedəcək məlumatı və linki bir yerdə yazın:")
+    await state.set_state(BroadcastState.mesaj_metni)
+
+@dp.message(BroadcastState.mesaj_metni)
+async def broadcast_send(m: types.Message, state: FSMContext):
+    users = database.butun_istifadecileri_getir()
+    count = 0
+    await m.answer("🚀 Mesaj göndərilir...")
+    for uid in users:
+        try:
+            await bot.send_message(uid, f"📢 **YENİ KAMPANİYA!**\n\n{m.text}")
+            count += 1
+            await asyncio.sleep(0.05)
+        except: pass
+    await m.answer(f"✅ Kateqoriyasız linkiniz {count} nəfərə uğurla çatdırıldı.")
+    await state.clear()
+
+@dp.message(F.text == "📊 Statistika")
+async def show_stats(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS: return
+    clicks = database.gunun_hesabati()
+    await message.answer(f"📊 **Gündəlik Hesabat**\nBu gün botdakı linklərə ümumi **{clicks}** klik edilib.")
+
+# Kateqoriyaya Səssiz Link Əlavə Etmək
 @dp.message(F.text == "➕ Kateqoriyaya Link")
 async def adm_l_1(m: types.Message, state: FSMContext):
-    await m.answer("Kateqoriya seçin:", reply_markup=admin_cat_secim())
+    if m.from_user.id not in ADMIN_IDS: return
+    await m.answer("Hansı kateqoriyaya link əlavə edirsiniz?", reply_markup=admin_top_cat_kb())
     await state.set_state(AdminState.link_kateqoriya)
-
-@dp.callback_query(AdminState.link_kateqoriya)
-async def adm_l_2(c: types.CallbackQuery, state: FSMContext):
-    await state.update_data(kat=c.data.replace("admcat_", ""))
-    await c.message.answer("Məhsulun adı:")
-    await state.set_state(AdminState.link_ad)
 
 @dp.message(AdminState.link_ad)
 async def adm_l_3(m: types.Message, state: FSMContext):
     await state.update_data(ad=m.text)
-    await m.answer("Trendyol Linki:")
+    await m.answer("Trendyol Linkini (və ya kodu) göndərin:")
     await state.set_state(AdminState.link_url)
 
 @dp.message(AdminState.link_url)
 async def adm_l_final(m: types.Message, state: FSMContext):
     data = await state.get_data()
-    # Əgər bu bir "Xüsusi Cavab"dırsa
-    if 'target' in data:
-        try:
-            await bot.send_message(data['target'], f"🎁 **İstəyinizə uyğun tapıldı!**\n\n{m.text}")
-            await m.answer("✅ Link yalnız həmin istifadəçiyə göndərildi.")
-        except: await m.answer("❌ Mesaj göndərilə bilmədi.")
-    else:
-        database.link_elave_et(data['kat'], data['ad'], m.text)
-        await m.answer(f"✅ Link '{data['kat']}' kateqoriyasına əlavə edildi. (Heç kimə bildiriş getmədi)")
+    database.link_elave_et(data['kat'], data['ad'], m.text)
+    
+    # SƏSSİZ ƏLAVƏ (Heç kimə bildiriş getmir)
+    await m.answer(f"✅ Link verilmiş kateqoriyaya uğurla əlavə edildi.\n(İstifadəçilərə heç bir bildiriş getmədi).")
+    
+    # Yalnız adminlərə hesabat gedir
+    for admin in ADMIN_IDS:
+        if admin != m.from_user.id:
+            try: await bot.send_message(admin, f"ℹ️ Digər admin '{data['kat']}' bölməsinə yeni link əlavə etdi: {data['ad']}")
+            except: pass
     await state.clear()
 
-# --- DİGƏR FUNKSİYALAR (START, PİNG VƏ S.) ---
-@dp.message(F.text == "🛍 Məhsul Kateqoriyası")
-async def cat_m(m: types.Message): await m.answer("Bölmə seçin:", reply_markup=cat_main())
-
-@dp.message(F.text == "🔥 Günün Endirimləri")
-async def f_gunun(m: types.Message): await linkleri_goster(m, "gunun", "🔥 Günün Endirimləri")
-
-@dp.message(F.text == "🎟 Aktiv Kodlar")
-async def f_kod(m: types.Message): await linkleri_goster(m, "kod", "🎟 Aktiv Kodlar")
-
-@dp.callback_query(F.data.startswith("getlink_"))
-async def g_link(c: types.CallbackQuery):
-    l_id = c.data.split("_")[1]
-    url = database.linki_getir(l_id)
-    if url: 
-        database.klik_artir(c.from_user.id)
-        await c.message.answer(f"🔗 Linkiniz:\n{url}")
-    await c.answer()
-
-async def ping(request): return web.Response(text="Bot Active")
+# --- RENDER ÜÇÜN VEB-SERVER ---
+async def ping(request):
+    return web.Response(text="Trendyol Bot is alive!")
 
 async def main():
     database.bazani_yarat()
+    print("Trendyol Affiliate Bot işə düşdü...")
+    
+    # XƏTANI (CONFLICT) KÖKÜNDƏN HƏLL EDƏN SƏTİR
+    await bot.delete_webhook(drop_pending_updates=True) 
+    await asyncio.sleep(1)
+    
     asyncio.create_task(dp.start_polling(bot))
+    
     app = web.Application()
     app.add_routes([web.get('/', ping)])
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 10000))
     await web.TCPSite(runner, '0.0.0.0', port).start()
-    while True: await asyncio.sleep(3600)
+    
+    while True:
+        await asyncio.sleep(3600)
 
-if __name__ == "__main__": asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
