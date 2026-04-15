@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import CommandStart, Command
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
@@ -24,7 +23,7 @@ class AdminState(StatesGroup):
     link_kateqoriya = State()
     link_ad = State()
     link_url = State()
-    reply_target_uid = State() # Şəxsi cavab üçün
+    reply_target_uid = State()
     reply_msg = State()
 
 class BroadcastState(StatesGroup):
@@ -33,12 +32,16 @@ class BroadcastState(StatesGroup):
 class SuggestionState(StatesGroup):
     mesaj = State()
 
+class BodySizeState(StatesGroup):
+    boy = State()
+    ceki = State()
+
 # --- MENYULAR ---
 def ana_menyu():
     duymeler = [
         [KeyboardButton(text="🔥 Günün Endirimləri"), KeyboardButton(text="🎟 Aktiv Kodlar")],
         [KeyboardButton(text="🕵️ Gizli Kampaniyalar"), KeyboardButton(text="⚡ Flash Endirimlər")],
-        [KeyboardButton(text="🛍 Məhsul Kateqoriyası")],
+        [KeyboardButton(text="🛍 Məhsul Kateqoriyası"), KeyboardButton(text="📏 Bədən Ölçüsü")],
         [KeyboardButton(text="💡 İstək və Təklif Qutusu")]
     ]
     return ReplyKeyboardMarkup(keyboard=duymeler, resize_keyboard=True)
@@ -87,7 +90,7 @@ def admin_top_cat_kb():
 
 # --- NAVİQASİYA (KATEQORİYA) İDARƏEDİCİSİ ---
 @dp.callback_query(F.data.startswith("nav_"))
-async def handle_nav(c: types.CallbackQuery):
+async def handle_nav(c: types.CallbackQuery, state: FSMContext):
     nav = c.data
     if nav == "nav_main": kb = nav_main_kb()
     elif nav == "nav_paltar": kb = nav_gender_kb("paltar")
@@ -124,17 +127,18 @@ async def linkleri_goster(message: types.Message, kateqoriya, bashliq):
 @dp.callback_query(F.data.startswith("ucat_"))
 async def handle_ucat(c: types.CallbackQuery, state: FSMContext):
     cat = c.data.replace("ucat_", "")
+    cat_adi = cat.replace("_", " ").title() # "paltar_qadin" sözünü "Paltar Qadin" edir (Xətanı həll edən sətir)
     current_state = await state.get_state()
 
     # Əgər klikləyən admin-dirsə və link əlavə edirsə:
     if current_state == AdminState.link_kateqoriya.state:
         await state.update_data(kat=cat)
-        await c.message.answer(f"✅ Kateqoriya seçildi: **{cat}**\n\nMəhsulun (və ya kodun) adını yazın:", parse_mode="Markdown")
+        await c.message.answer(f"✅ Kateqoriya seçildi: {cat_adi}\n\nMəhsulun (və ya kodun) adını yazın:")
         await state.set_state(AdminState.link_ad)
     
     # Əgər sadə istifadəçidirsə, həmin kateqoriyanın məhsullarını göstər:
     else:
-        await linkleri_goster(c.message, cat, f"🛍 Seçilmiş Bölmə: {cat}")
+        await linkleri_goster(c.message, cat, f"🛍 Seçilmiş Bölmə: {cat_adi}")
     await c.answer()
 
 @dp.callback_query(F.data.startswith("getlink_"))
@@ -168,6 +172,38 @@ async def m_flash(m: types.Message): await linkleri_goster(m, "flash", "⚡ Flas
 
 @dp.message(F.text == "🛍 Məhsul Kateqoriyası")
 async def m_cat(m: types.Message): await m.answer("Bölməni seçin:", reply_markup=nav_main_kb())
+
+
+# ==========================================
+# 📏 BƏDƏN ÖLÇÜSÜ (KALKULYATOR)
+# ==========================================
+@dp.message(F.text == "📏 Bədən Ölçüsü")
+async def size_start(message: types.Message, state: FSMContext):
+    await message.answer("Boyunuzu sm ilə yazın (məsələn: 170):")
+    await state.set_state(BodySizeState.boy)
+
+@dp.message(BodySizeState.boy)
+async def size_boy(message: types.Message, state: FSMContext):
+    if not message.text.isdigit(): return await message.answer("Xahiş edirəm rəqəm yazın.")
+    await state.update_data(boy=int(message.text))
+    await message.answer("İndi isə çəkinizi kq ilə yazın (məsələn: 65):")
+    await state.set_state(BodySizeState.ceki)
+
+@dp.message(BodySizeState.ceki)
+async def size_ceki(message: types.Message, state: FSMContext):
+    if not message.text.isdigit(): return await message.answer("Xahiş edirəm rəqəm yazın.")
+    data = await state.get_data()
+    boy = data['boy'] / 100
+    bmi = int(message.text) / (boy ** 2)
+    
+    if bmi < 18.5: beden = "XS və ya S"
+    elif 18.5 <= bmi < 24.9: beden = "S və ya M"
+    elif 25 <= bmi < 29.9: beden = "L və ya XL"
+    else: beden = "XXL və üstü"
+        
+    await message.answer(f"Təxmini Trendyol ölçünüz: **{beden}** 👕\n\n*(Qeyd: Bu standart kütlə indeksinə əsaslanır. Məhsulun qəlibinə görə dəyişə bilər)*", parse_mode="Markdown")
+    await state.clear()
+
 
 # ==========================================
 # 💡 İSTƏK / TƏKLİF VƏ ŞƏXSİ CAVAB SİSTEMİ
@@ -219,6 +255,7 @@ async def admin_reply_send(m: types.Message, state: FSMContext):
             try: await bot.send_message(admin, f"ℹ️ Admin @{m.from_user.username} istifadəçinin istəyinə cavab verdi:\n{m.text}")
             except: pass
     await state.clear()
+
 
 # ==========================================
 # 👑 ADMIN PANELİ VƏ TOPLU MESAJ (BROADCAST)
