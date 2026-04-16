@@ -149,7 +149,6 @@ async def handle_ucat(c: types.CallbackQuery, state: FSMContext):
             kb = InlineKeyboardMarkup(inline_keyboard=[])
             for l_id, name, url in linkler:
                 mesaj += f"🔸 **{name}**\n🔗 {url}\n\n"
-                # Silmək üçün düymə yaradırıq
                 kb.inline_keyboard.append([InlineKeyboardButton(text=f"❌ {name} (Sil)", callback_data=f"dellink_{l_id}")])
             await c.message.answer(mesaj + "Silmək istədiyiniz məhsulun düyməsinə basın:", reply_markup=kb, disable_web_page_preview=True, parse_mode="Markdown")
         await state.clear()
@@ -316,11 +315,11 @@ async def show_users_count(message: types.Message):
     users = database.butun_istifadecileri_getir()
     await message.answer(f"👥 **Botun Ümumi İstifadəçi Sayı:** {len(users)} nəfər.", parse_mode="Markdown")
 
-# ADMIN - Hamıya Mesaj (Broadcast - Kateqoriyasız Link)
+# ADMIN - Hamıya Mesaj (Broadcast - Mətn və ŞƏKİL Dəstəkli)
 @dp.message(F.text == "📢 Hamıya Mesaj (Kateqoriyasız)")
 async def broadcast_start(m: types.Message, state: FSMContext):
     if m.from_user.id not in ADMIN_IDS: return
-    await m.answer("Bütün bot istifadəçilərinə gedəcək məlumatı və linki bir yerdə yazın:")
+    await m.answer("Bütün bot istifadəçilərinə gedəcək məlumatı (şəkil və ya sadəcə mətn) göndərin:")
     await state.set_state(BroadcastState.mesaj_metni)
 
 @dp.message(BroadcastState.mesaj_metni)
@@ -328,13 +327,23 @@ async def broadcast_send(m: types.Message, state: FSMContext):
     users = database.butun_istifadecileri_getir()
     count = 0
     await m.answer("🚀 Mesaj göndərilir...")
+    
     for uid in users:
         try:
-            await bot.send_message(uid, f"📢 **YENİ KAMPANİYA!**\n\n{m.text}")
+            if m.photo:
+                # Əgər göndərilən şəkildirsə (və altındakı yazını da götürürük)
+                caption_text = m.caption if m.caption else ""
+                await bot.send_photo(uid, photo=m.photo[-1].file_id, caption=f"📢 **YENİ KAMPANİYA!**\n\n{caption_text}")
+            else:
+                # Əgər sadəcə mətndirsə
+                await bot.send_message(uid, f"📢 **YENİ KAMPANİYA!**\n\n{m.text}")
+                
             count += 1
-            await asyncio.sleep(0.05)
-        except: pass
-    await m.answer(f"✅ Kateqoriyasız linkiniz {count} nəfərə uğurla çatdırıldı.")
+            await asyncio.sleep(0.05) # Telegramın spam limitinə düşməmək üçün kiçik fasilə
+        except: 
+            pass
+            
+    await m.answer(f"✅ Kateqoriyasız linkiniz/şəkliniz {count} nəfərə uğurla çatdırıldı.")
     await state.clear()
 
 @dp.message(F.text == "📊 Statistika")
