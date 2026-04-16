@@ -56,7 +56,8 @@ def nav_main_kb():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👗 Paltar", callback_data="nav_paltar"), InlineKeyboardButton(text="👕 Köynək", callback_data="nav_koynek")],
         [InlineKeyboardButton(text="👖 Şalvar", callback_data="nav_salvar"), InlineKeyboardButton(text="👟 Ayaqqabı", callback_data="nav_ay")],
-        [InlineKeyboardButton(text="👶 Uşaq Geyimləri", callback_data="nav_usaq"), InlineKeyboardButton(text="🕶 Aksesuar", callback_data="nav_aks")]
+        [InlineKeyboardButton(text="👶 Uşaq Geyimləri", callback_data="nav_usaq"), InlineKeyboardButton(text="🕶 Aksesuar", callback_data="nav_aks")],
+        [InlineKeyboardButton(text="💄 Baxım Məhsulları", callback_data="nav_baxim")]
     ])
 
 def nav_gender_kb(prefix):
@@ -103,6 +104,7 @@ async def handle_nav(c: types.CallbackQuery, state: FSMContext):
     elif nav == "nav_ay_qadin": kb = nav_ay_type_kb("qadin")
     elif nav == "nav_ay_kisi": kb = nav_ay_type_kb("kisi")
     elif nav == "nav_usaq": kb = nav_usaq_kb()
+    elif nav == "nav_baxim": kb = nav_gender_kb("baxim")
     else: return
     
     await c.message.edit_reply_markup(reply_markup=kb)
@@ -137,17 +139,19 @@ async def handle_ucat(c: types.CallbackQuery, state: FSMContext):
         await c.message.answer(f"✅ Kateqoriya seçildi: {cat_adi}\n\nMəhsulun (və ya kodun) adını yazın:")
         await state.set_state(AdminState.link_ad)
     
-    # 2. ADMIN LİNK SİLİRSƏ
+    # 2. ADMIN LİNKƏ BAXIRSA VƏ YA SİLİRSƏ
     elif current_state == DeleteState.kat_sec.state:
         linkler = database.kateqoriya_linklerini_getir(cat)
         if not linkler:
-            await c.message.answer(f"'{cat_adi}' kateqoriyasında silinəcək link yoxdur.")
+            await c.message.answer(f"'{cat_adi}' kateqoriyasında heç bir link yoxdur.")
         else:
+            mesaj = f"📋 **{cat_adi}** bölməsindəki aktiv linklər:\n\n"
             kb = InlineKeyboardMarkup(inline_keyboard=[])
-            for l_id, name, _ in linkler:
+            for l_id, name, url in linkler:
+                mesaj += f"🔸 **{name}**\n🔗 {url}\n\n"
                 # Silmək üçün düymə yaradırıq
                 kb.inline_keyboard.append([InlineKeyboardButton(text=f"❌ {name} (Sil)", callback_data=f"dellink_{l_id}")])
-            await c.message.answer(f"🗑 **{cat_adi}** bölməsindəki linklər.\nSilmək istədiyinizə basın:", reply_markup=kb, parse_mode="Markdown")
+            await c.message.answer(mesaj + "Silmək istədiyiniz məhsulun düyməsinə basın:", reply_markup=kb, disable_web_page_preview=True, parse_mode="Markdown")
         await state.clear()
 
     # 3. İSTİFADƏÇİ BAXIRSA
@@ -285,9 +289,10 @@ async def admin_reply_send(m: types.Message, state: FSMContext):
 async def admin_panel(message: types.Message):
     if message.from_user.id not in ADMIN_IDS: return
     kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="➕ Kateqoriyaya Link"), KeyboardButton(text="🗑 Link Sil")],
+        [KeyboardButton(text="➕ Kateqoriyaya Link"), KeyboardButton(text="📋 Linklərə Bax / Sil")],
         [KeyboardButton(text="📢 Hamıya Mesaj (Kateqoriyasız)")],
-        [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="🔙 Ana Menyuya Qayıt")]
+        [KeyboardButton(text="📊 Statistika"), KeyboardButton(text="👥 İstifadəçi Sayı")],
+        [KeyboardButton(text="🔙 Ana Menyuya Qayıt")]
     ], resize_keyboard=True)
     await message.answer("👑 Admin Paneli. Nə etmək istəyirsiniz?", reply_markup=kb)
 
@@ -297,15 +302,21 @@ async def back_to_main_menu(message: types.Message):
     if message.from_user.id not in ADMIN_IDS: return
     await message.answer("Ana menyuya qayıtdınız. 🛍", reply_markup=ana_menyu())
 
-# ADMIN - Link Silmək
-@dp.message(F.text == "🗑 Link Sil")
+# ADMIN - Linklərə Baxmaq və Silmək
+@dp.message(F.text == "📋 Linklərə Bax / Sil")
 async def adm_del_1(m: types.Message, state: FSMContext):
     if m.from_user.id not in ADMIN_IDS: return
-    await m.answer("Hansı kateqoriyadan link silmək istəyirsiniz?", reply_markup=admin_top_cat_kb())
+    await m.answer("Hansı kateqoriyadakı linklərə baxmaq (və ya silmək) istəyirsiniz?", reply_markup=admin_top_cat_kb())
     await state.set_state(DeleteState.kat_sec)
 
+# ADMIN - İstifadəçi Sayına Baxmaq
+@dp.message(F.text == "👥 İstifadəçi Sayı")
+async def show_users_count(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS: return
+    users = database.butun_istifadecileri_getir()
+    await message.answer(f"👥 **Botun Ümumi İstifadəçi Sayı:** {len(users)} nəfər.", parse_mode="Markdown")
+
 # ADMIN - Hamıya Mesaj (Broadcast - Kateqoriyasız Link)
-# QEYD: Broadcast mesajları botun bazasında qalmadığı üçün onları silməyə ehtiyac yoxdur.
 @dp.message(F.text == "📢 Hamıya Mesaj (Kateqoriyasız)")
 async def broadcast_start(m: types.Message, state: FSMContext):
     if m.from_user.id not in ADMIN_IDS: return
