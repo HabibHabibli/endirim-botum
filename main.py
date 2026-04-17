@@ -12,7 +12,7 @@ import database
 logging.basicConfig(level=logging.INFO)
 
 # 👇 BURAYA ÖZ TOKENİNİ VƏ ADMİN ID-LƏRİNİ YAZ
-TOKEN = "8740821772:AAHn1gMm_hdn-UDYD41LtcCwYZjW1blMPmc"
+TOKEN = "8740821772:AAFoNLga7GqOTcqb5s7lBfIrBpUqcU2A2LI"
 ADMIN_IDS = [8645642283, 2111781743, 1365999883]  
 
 bot = Bot(token=TOKEN)
